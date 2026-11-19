@@ -83,7 +83,11 @@ export async function carregarTodosOsAnosDinamicos(spreadsheetId = SPREADSHEET_I
 
       // Colunas da sua planilha "Coleta de dados demanda"
       const dataStr = r[0].trim(); // Coluna A: Data (ex: 19/10/2026)
-      const usina = r[1] ? r[1].trim() : ''; // Coluna B: Usina
+      const usinaBruta = r[1] ? r[1].trim() : '';
+const usina = usinaBruta
+  .replace(/^Solar Field\s*/i, '') // Remove "Solar Field " do início
+  .replace(/:\s*Active Power$/i, '') // Remove ": Active Power" do final
+  .trim();
       const potenciaStr = r[2] ? r[2].replace(/\./g, '').replace(',', '.') : '0'; // Coluna C: Potência
       const potencia = parseFloat(potenciaStr) || 0;
       const horaStr = r[3] ? r[3].trim() : ''; // Coluna D: Hora (ex: 10:00)
