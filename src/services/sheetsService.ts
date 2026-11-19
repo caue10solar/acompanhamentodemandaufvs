@@ -92,9 +92,7 @@ function extrairDataSegura(str: string): { dia: string; mesIdx: number; ano: num
 
 export async function carregarTodosOsAnosDinamicos(spreadsheetId = SPREADSHEET_ID): Promise<DemandaAnoData[]> {
   const nomeAba = encodeURIComponent(NOME_ABA_DADOS_BRUTOS);
-  // Usando gviz com tq=select * para garantir que traga TODAS as 18.000+ linhas sem cortar
-  const query = encodeURIComponent('SELECT A, B, C, D');
-  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&tq=${query}&t=${Date.now()}`;
+  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&headers=1&t=${Date.now()}`;
 
   try {
     const res = await fetch(url);
