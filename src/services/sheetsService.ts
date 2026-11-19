@@ -98,7 +98,7 @@ function parseDataColunaA(str: string): { dia: string; mesIdx: number; ano: numb
 
 export async function carregarTodosOsAnosDinamicos(spreadsheetId = SPREADSHEET_ID): Promise<DemandaAnoData[]> {
   const nomeAba = encodeURIComponent(NOME_ABA_DADOS_BRUTOS);
-  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&headers=1&t=${Date.now()}`;
+const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=0&t=${Date.now()}`;
 
   try {
     const res = await fetch(url);
