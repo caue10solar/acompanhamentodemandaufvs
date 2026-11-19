@@ -132,7 +132,7 @@ function parseDataSegura(str: string): { dia: string; mesIdx: number; ano: numbe
 async function carregarCadastroDemandas(spreadsheetId: string): Promise<{ [chave: string]: UsinaCadastroInfo }> {
   const nomeAba = encodeURIComponent(NOME_ABA_CADASTRO);
   const tq = encodeURIComponent('SELECT A, B, C');
-  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&tq=${tq}&t=${Date.now()}`;
+ const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=0&sheet=${nomeAba}`;
 
   const mapa: { [chave: string]: UsinaCadastroInfo } = {};
 
@@ -179,7 +179,7 @@ export async function carregarTodosOsAnosDinamicos(spreadsheetId = SPREADSHEET_I
   const res = await carregarDadosCompletosSheets(spreadsheetId);
   return res.anos;
 }
-const CACHE_KEY = 'cache_demanda_usinas_v1';
+const CACHE_KEY = 'cache_demanda_usinas_v2';
 
 export function limparCacheSheets() {
   try {
@@ -212,7 +212,7 @@ export async function carregarDadosCompletosSheets(
   const nomeAba = encodeURIComponent(NOME_ABA_DADOS_BRUTOS);
   // Filtra linhas vazias direto no Google Sheets (WHERE B IS NOT NULL) para reduzir o tamanho do download
   const tq = encodeURIComponent('SELECT A, B, C, D WHERE B IS NOT NULL');
-  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&tq=${tq}`;
+const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&t=${Date.now()}`;
 
   const [resColeta, cadastro] = await Promise.all([
     fetch(url),
