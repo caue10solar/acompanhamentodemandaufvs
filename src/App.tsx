@@ -90,7 +90,7 @@ export default function App() {
 
     try {
       // 1. Busca os dados brutos da nossa nova função automatizada do Google Sheets
-      const dadosDinamicos = await carregarTodosOsAnosDinamicos();
+    const { anos: dadosDinamicos, cadastro } = await carregarDadosCompletosSheets();
 
       if (!dadosDinamicos || dadosDinamicos.length === 0) {
         throw new Error('Não foi possível carregar os dados da planilha Google Sheets.');
@@ -110,7 +110,9 @@ export default function App() {
           const nome = usinaData.usina;
           if (!usinasMap.has(nome)) {
             // Usa as demandas fixas cadastradas no site (ou cria padrão de segurança)
-            const fixas = getDemandaFixa(nome) || { contractedDemandKw: 1000, toleranceLimitKw: 1030, threshold5PctKw: 950 };
+            const chave = normalizarChaveUsina(nome);
+const infoPlanilha = cadastro[chave];
+const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000, toleranceLimitKw: 1030, threshold5PctKw: 950 };
             usinasMap.set(nome, {
               id: nome,
               name: nome,
