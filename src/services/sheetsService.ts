@@ -1,14 +1,11 @@
-// ID oficial extraído da sua folha de cálculo Google Sheets
 export const SPREADSHEET_ID = '1GsN74WrnAnXOVKx6ltlmKUCFrtGYh4P6cztk_2pbBjA';
-
-// NOME DA ABA ONDE FICAM OS DADOS BRUTOS DIÁRIOS
 const NOME_ABA_DADOS_BRUTOS = 'Coleta de dados demanda';
 
 export interface UsinaDemandaItem {
   usina: string;
   ano: number;
-  meses: { [mes: string]: number }; // Mantém a compatibilidade com o resto do site
-  detalhesPico: { [mes: string]: { dia: string; hora: string } }; // NOVO: Guarda o dia e hora do pico
+  meses: { [mes: string]: number };
+  detalhesPico: { [mes: string]: { dia: string; hora: string } };
 }
 
 export interface DemandaAnoData {
@@ -16,7 +13,6 @@ export interface DemandaAnoData {
   dados: UsinaDemandaItem[];
 }
 
-// Leitor CSV nativo robusto (não necessita de bibliotecas externas)
 function parseCsvLinhas(text: string): string[][] {
   const lines: string[][] = [];
   let row: string[] = [];
@@ -54,12 +50,51 @@ function parseCsvLinhas(text: string): string[][] {
   return lines;
 }
 
-/**
- * Lê os dados brutos, agrupa por ano/mês e guarda o dia e hora do maior pico
- */
+// Função inteligente que entende qualquer formato de data que o Google Sheets enviar
+function extrairDataSegura(str: string): { dia: string; mesIdx: number; ano: number } | null {
+  if (!str) return null;
+  const apenasData = str.split(' ')[0].trim();
+
+  // Formato DD/MM/YYYY (ex: 19/11/2026)
+  if (apenasData.includes('/')) {
+    const partes = apenasData.split('/');
+    if (partes.length === 3) {
+      const p0 = parseInt(partes[0], 10);
+      const p1 = parseInt(partes[1], 10);
+      const ano = parseInt(partes[2], 10);
+      // Se o primeiro número for > 12, com certeza é dia (DD/MM/YYYY)
+      // Caso contrário, assume padrão brasileiro DD/MM/YYYY
+      return {
+        dia: `${String(p0).padStart(2, '0')}/${String(p1).padStart(2, '0')}/${ano}`,
+        mesIdx: p1 - 1,
+        ano,
+      };
+    }
+  }
+
+  // Formato YYYY-MM-DD (ex: 2026-11-19 - padrão interno do Google Sheets)
+  if (apenasData.includes('-')) {
+    const partes = apenasData.split('-');
+    if (partes.length === 3) {
+      const ano = parseInt(partes[0], 10);
+      const mes = parseInt(partes[1], 10);
+      const dia = parseInt(partes[2], 10);
+      return {
+        dia: `${String(dia).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${ano}`,
+        mesIdx: mes - 1,
+        ano,
+      };
+    }
+  }
+
+  return null;
+}
+
 export async function carregarTodosOsAnosDinamicos(spreadsheetId = SPREADSHEET_ID): Promise<DemandaAnoData[]> {
   const nomeAba = encodeURIComponent(NOME_ABA_DADOS_BRUTOS);
-  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&t=${Date.now()}`;
+  // Usando gviz com tq=select * para garantir que traga TODAS as 18.000+ linhas sem cortar
+  const query = encodeURIComponent('SELECT A, B, C, D');
+  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&tq=${query}&t=${Date.now()}`;
 
   try {
     const res = await fetch(url);
@@ -69,40 +104,46 @@ export async function carregarTodosOsAnosDinamicos(spreadsheetId = SPREADSHEET_I
     if (csvText.includes('<!DOCTYPE html>')) return [];
 
     const rows = parseCsvLinhas(csvText);
-    if (rows.length < 2) return []; // Precisa ter pelo menos o cabeçalho e 1 linha
+    if (rows.length < 2) return [];
 
     const mesesNomes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-    
-    // Mapas para organizar os dados: Ano -> Nome da Usina -> UsinaDemandaItem
     const agrupamentoPorAno = new Map<number, Map<string, UsinaDemandaItem>>();
 
-    // Loop a partir da linha 1 para ignorar o cabeçalho
     for (let i = 1; i < rows.length; i++) {
       const r = rows[i];
-      if (!r[0] || r[0].trim() === '') continue; // Ignora linhas vazias
+      if (!r[0] || !r[1]) continue;
 
-      // Colunas da sua planilha "Coleta de dados demanda"
-      const dataStr = r[0].trim(); // Coluna A: Data (ex: 19/10/2026)
-      const usinaBruta = r[1] ? r[1].trim() : '';
-const usina = usinaBruta
-  .replace(/^Solar Field\s*/i, '') // Remove "Solar Field " do início
-  .replace(/:\s*Active Power$/i, '') // Remove ": Active Power" do final
-  .trim();
-      const potenciaStr = r[2] ? r[2].replace(/\./g, '').replace(',', '.') : '0'; // Coluna C: Potência
+      const dataColA = r[0].trim();
+      const usinaBruta = r[1].trim();
+      const usina = usinaBruta
+        .replace(/^Solar Field\s*/i, '')
+        .replace(/:\s*Active Power$/i, '')
+        .trim();
+
+      // Trata tanto números com vírgula (2.505,03) quanto com ponto (2505.03)
+      let potenciaStr = r[2] ? r[2].trim() : '0';
+      if (potenciaStr.includes(',') && potenciaStr.includes('.')) {
+        potenciaStr = potenciaStr.replace(/\./g, '').replace(',', '.');
+      } else if (potenciaStr.includes(',')) {
+        potenciaStr = potenciaStr.replace(',', '.');
+      }
       const potencia = parseFloat(potenciaStr) || 0;
-      const horaStr = r[3] ? r[3].trim() : ''; // Coluna D: Hora (ex: 10:00)
 
-      // Extrai dia, mês e ano da string de data (assumindo formato DD/MM/YYYY)
-      const partesData = dataStr.split('/');
-      if (partesData.length !== 3) continue;
-      
-      const mesIdx = parseInt(partesData[1], 10) - 1;
-      const ano = parseInt(partesData[2], 10);
+      const horaColD = r[3] ? r[3].trim() : '';
 
+      // Prioriza a data real da Coluna D se ela vier completa (ex: "28/02/2025 12:20"), senão usa a Coluna A
+      let infoData = extrairDataSegura(horaColD);
+      if (!infoData) {
+        infoData = extrairDataSegura(dataColA);
+      }
+      if (!infoData) continue;
+
+      const { dia: diaFinal, mesIdx, ano } = infoData;
       if (isNaN(ano) || isNaN(mesIdx) || mesIdx < 0 || mesIdx > 11) continue;
-      const mesNome = mesesNomes[mesIdx];
 
-      // Inicializa os agrupamentos se ainda não existirem
+      const mesNome = mesesNomes[mesIdx];
+      const horaFinal = horaColD.includes(' ') ? horaColD.split(' ')[1] : (horaColD || '--:--');
+
       if (!agrupamentoPorAno.has(ano)) {
         agrupamentoPorAno.set(ano, new Map());
       }
@@ -113,45 +154,30 @@ const usina = usinaBruta
           usina,
           ano,
           meses: {},
-          detalhesPico: {}
+          detalhesPico: {},
         });
       }
 
-      // Lógica do Pico: Compara se o valor da linha atual é maior que o valor salvo
       const usinaData = usinasDoAno.get(usina)!;
       const picoAtualNoMes = usinaData.meses[mesNome] || 0;
 
-     if (potencia > picoAtualNoMes) {
-     usinaData.meses[mesNome] = potencia;
+      if (potencia > picoAtualNoMes) {
+        usinaData.meses[mesNome] = potencia;
+        usinaData.detalhesPico[mesNome] = { dia: diaFinal, hora: horaFinal };
+      }
+    }
 
-     let diaFinal = dataStr;
-     let horaFinal = horaStr;
-
-     // Se a Coluna D já tiver data e hora juntas (ex: "28/02/2025 12:20")
-     if (horaStr.includes(' ')) {
-       const partes = horaStr.split(' ');
-       diaFinal = partes[0];
-       horaFinal = partes[1];
-     }
-
-     usinaData.detalhesPico[mesNome] = { dia: diaFinal, hora: horaFinal };
-   }
-
-    // Transforma o Map numa lista (Array) organizada para o site exibir
     const resultadoFinal: DemandaAnoData[] = [];
-    
     agrupamentoPorAno.forEach((usinasMap, ano) => {
       resultadoFinal.push({
-        ano: ano,
-        dados: Array.from(usinasMap.values())
+        ano,
+        dados: Array.from(usinasMap.values()),
       });
     });
 
-    // Ordena do ano mais recente para o mais antigo (ex: 2026, 2025, 2024)
     return resultadoFinal.sort((a, b) => b.ano - a.ano);
-
   } catch (error) {
-    console.error("Erro ao carregar dados do Google Sheets:", error);
+    console.error('Erro ao carregar dados do Google Sheets:', error);
     return [];
   }
 }
