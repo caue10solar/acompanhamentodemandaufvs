@@ -70,6 +70,9 @@ export const DemandChart: React.FC<DemandChartProps> = ({
           ...found,
           powerKw: found.powerKw && found.powerKw > 0 ? found.powerKw : null,
           displayMonth: found.monthShort,
+          // Pega os dados do pico que criámos no passo anterior
+          diaPico: found.detalhesPico ? found.detalhesPico.dia : 'N/D',
+          horaPico: found.detalhesPico ? found.detalhesPico.hora : '--:--'
         };
       }
       return {
@@ -530,9 +533,13 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, contract
 
       <div className="space-y-1.5">
         <div className="flex justify-between items-center">
-          <span className="text-slate-400">Potência Pico Medida:</span>
-          <span className={`font-mono font-bold text-sm ${data.isExceeded ? 'text-red-400' : 'text-blue-400'}`}>
-            {formatKw(data.powerKw)}
+       {/* Linha Nova com a Data e Hora */}
+        <div className="flex justify-between items-center border-b border-slate-800 pb-1 mb-1">
+          <span className="text-slate-400 flex items-center gap-1">
+            <Calendar className="w-3 h-3" /> Pico Registado:
+          </span>
+          <span className="font-mono text-xs text-amber-200">
+            {data.diaPico} às {data.horaPico}
           </span>
         </div>
 
