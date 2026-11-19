@@ -9,7 +9,6 @@ import {
   CartesianGrid,
   Tooltip,
   ReferenceLine,
-  Legend,
 } from 'recharts';
 import { UsinaMonthlyRecord, MonthDataPoint } from '../types/demand';
 import { formatKw } from '../utils/demandParser';
@@ -26,7 +25,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
   selectedYear = 2025,
   onSelectYear,
 }) => {
-  // Available years from usina
   const availableYears = useMemo(() => {
     const yearsSet = new Set<number>();
     if (usina.availableYears) {
@@ -49,10 +47,8 @@ export const DemandChart: React.FC<DemandChartProps> = ({
     setViewMode('single');
   };
 
-  // Single year data (12 months of activeYear)
   const singleYearData = useMemo(() => {
     const yearMonths = usina.months.filter((m) => m.year === activeYear);
-    // Ensure all 12 months 1..12 are represented
     const monthNames = [
       'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
       'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'
@@ -70,7 +66,7 @@ export const DemandChart: React.FC<DemandChartProps> = ({
           ...found,
           powerKw: found.powerKw && found.powerKw > 0 ? found.powerKw : null,
           displayMonth: found.monthShort,
-          // Pega os dados do pico que criámos no passo anterior
+          // Nova funcionalidade: Data e Hora
           diaPico: found.detalhesPico ? found.detalhesPico.dia : 'N/D',
           horaPico: found.detalhesPico ? found.detalhesPico.hora : '--:--'
         };
@@ -89,11 +85,12 @@ export const DemandChart: React.FC<DemandChartProps> = ({
         excessKw: 0,
         percentageOfContracted: 0,
         displayMonth: monthNames[i],
+        diaPico: 'N/D',
+        horaPico: '--:--'
       };
     });
   }, [usina, activeYear]);
 
-  // Comparative data (months 1..12 with 2024 and 2025 columns)
   const comparativeData = useMemo(() => {
     const monthNames = [
       'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun',
@@ -125,7 +122,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
     });
   }, [usina]);
 
-  // Dynamic Y-axis domain
   const { yMin, yMax } = useMemo(() => {
     const values: number[] = [usina.contractedDemandKw, usina.toleranceLimitKw];
 
@@ -161,7 +157,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
-      {/* Chart Header */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between pb-4 mb-4 border-b border-slate-100 gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -190,7 +185,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
           </p>
         </div>
 
-        {/* Year Selector Tabs on Top Right */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200 text-xs font-bold">
             {availableYears.map((yr) => (
@@ -222,7 +216,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
         </div>
       </div>
 
-      {/* Legend */}
       <div className="flex flex-wrap items-center justify-between gap-3 text-xs mb-3 pb-2 border-b border-slate-50">
         <div className="flex flex-wrap items-center gap-3.5">
           {viewMode === 'single' ? (
@@ -272,7 +265,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
         </div>
       </div>
 
-      {/* Chart Canvas */}
       <div className="h-84 sm:h-96 w-full">
         {viewMode === 'single' ? (
           activePointsCount === 0 ? (
@@ -321,7 +313,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
                   cursor={{ fill: 'rgba(241, 245, 249, 0.6)' }}
                 />
 
-                {/* Reference Line: Demanda Contratada */}
                 <ReferenceLine
                   y={usina.contractedDemandKw}
                   stroke="#475569"
@@ -336,7 +327,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
                   }}
                 />
 
-                {/* Reference Line: Limite +3% */}
                 <ReferenceLine
                   y={usina.toleranceLimitKw}
                   stroke="#DC2626"
@@ -352,7 +342,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
                   }}
                 />
 
-                {/* Bars */}
                 <Bar
                   dataKey="powerKw"
                   name="Potência Pico (kW)"
@@ -370,7 +359,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
             </ResponsiveContainer>
           )
         ) : (
-          /* Comparative 2024 x 2025 Chart */
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
               data={comparativeData}
@@ -428,7 +416,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
                 }}
               />
 
-              {/* Bar 2024 */}
               <Bar
                 dataKey="power2024"
                 name="2024 (kW)"
@@ -444,7 +431,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
                 ))}
               </Bar>
 
-              {/* Bar 2025 */}
               <Bar
                 dataKey="power2025"
                 name="2025 (kW)"
@@ -460,7 +446,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
                 ))}
               </Bar>
 
-              {/* Bar 2026 */}
               <Bar
                 dataKey="power2026"
                 name="2026 (kW)"
@@ -480,7 +465,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
         )}
       </div>
 
-      {/* Footer Info Strip */}
       <div className="mt-3 pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between text-xs text-slate-500">
         <span className="flex items-center gap-1.5">
           <span className="w-2 h-2 rounded-full bg-slate-400" />
@@ -496,7 +480,6 @@ export const DemandChart: React.FC<DemandChartProps> = ({
   );
 };
 
-// Custom Tooltip for Single Year
 interface CustomTooltipProps {
   active?: boolean;
   payload?: any[];
@@ -508,7 +491,7 @@ interface CustomTooltipProps {
 const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, contracted, tolerance, year }) => {
   if (!active || !payload || !payload.length) return null;
 
-  const data: MonthDataPoint = payload[0].payload;
+  const data: any = payload[0].payload;
   if (!data.powerKw) return null;
 
   const deltaContracted = data.powerKw - contracted;
@@ -532,14 +515,19 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, contract
       </div>
 
       <div className="space-y-1.5">
-        <div className="flex justify-between items-center">
-       {/* Linha Nova com a Data e Hora */}
         <div className="flex justify-between items-center border-b border-slate-800 pb-1 mb-1">
           <span className="text-slate-400 flex items-center gap-1">
             <Calendar className="w-3 h-3" /> Pico Registado:
           </span>
           <span className="font-mono text-xs text-amber-200">
             {data.diaPico} às {data.horaPico}
+          </span>
+        </div>
+
+        <div className="flex justify-between items-center">
+          <span className="text-slate-400">Potência Pico Medida:</span>
+          <span className={`font-mono font-bold text-sm ${data.isExceeded ? 'text-red-400' : 'text-blue-400'}`}>
+            {formatKw(data.powerKw)}
           </span>
         </div>
 
@@ -580,7 +568,6 @@ const CustomTooltip: React.FC<CustomTooltipProps> = ({ active, payload, contract
   );
 };
 
-// Custom Tooltip for Comparative 2024 x 2025
 interface ComparativeTooltipProps {
   active?: boolean;
   payload?: any[];
