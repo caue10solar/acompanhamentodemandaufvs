@@ -50,20 +50,27 @@ function parseCsvLinhas(text: string): string[][] {
   return lines;
 }
 
-// Função inteligente que entende qualquer formato de data que o Google Sheets enviar
-function extrairDataSegura(str: string): { dia: string; mesIdx: number; ano: number } | null {
+function parseDataColunaA(str: string): { dia: string; mesIdx: number; ano: number } | null {
   if (!str) return null;
   const apenasData = str.split(' ')[0].trim();
 
-  // Formato DD/MM/YYYY (ex: 19/11/2026)
   if (apenasData.includes('/')) {
     const partes = apenasData.split('/');
     if (partes.length === 3) {
       const p0 = parseInt(partes[0], 10);
       const p1 = parseInt(partes[1], 10);
       const ano = parseInt(partes[2], 10);
-      // Se o primeiro número for > 12, com certeza é dia (DD/MM/YYYY)
-      // Caso contrário, assume padrão brasileiro DD/MM/YYYY
+
+      // Se p1 > 12, o Google enviou formato americano MM/DD/YYYY (ex: 11/19/2026 -> Mês 11, Dia 19)
+      if (p1 > 12) {
+        return {
+          dia: `${String(p1).padStart(2, '0')}/${String(p0).padStart(2, '0')}/${ano}`,
+          mesIdx: p0 - 1,
+          ano,
+        };
+      }
+
+      // Padrão brasileiro DD/MM/YYYY (ex: 01/11/2026 -> Dia 01, Mês 11)
       return {
         dia: `${String(p0).padStart(2, '0')}/${String(p1).padStart(2, '0')}/${ano}`,
         mesIdx: p1 - 1,
@@ -72,7 +79,6 @@ function extrairDataSegura(str: string): { dia: string; mesIdx: number; ano: num
     }
   }
 
-  // Formato YYYY-MM-DD (ex: 2026-11-19 - padrão interno do Google Sheets)
   if (apenasData.includes('-')) {
     const partes = apenasData.split('-');
     if (partes.length === 3) {
@@ -112,13 +118,18 @@ export async function carregarTodosOsAnosDinamicos(spreadsheetId = SPREADSHEET_I
       if (!r[0] || !r[1]) continue;
 
       const dataColA = r[0].trim();
+      const infoData = parseDataColunaA(dataColA);
+      if (!infoData) continue;
+
+      const { dia: diaColA, mesIdx, ano } = infoData;
+      if (isNaN(ano) || isNaN(mesIdx) || mesIdx < 0 || mesIdx > 11) continue;
+
       const usinaBruta = r[1].trim();
       const usina = usinaBruta
         .replace(/^Solar Field\s*/i, '')
         .replace(/:\s*Active Power$/i, '')
         .trim();
 
-      // Trata tanto números com vírgula (2.505,03) quanto com ponto (2505.03)
       let potenciaStr = r[2] ? r[2].trim() : '0';
       if (potenciaStr.includes(',') && potenciaStr.includes('.')) {
         potenciaStr = potenciaStr.replace(/\./g, '').replace(',', '.');
@@ -128,19 +139,17 @@ export async function carregarTodosOsAnosDinamicos(spreadsheetId = SPREADSHEET_I
       const potencia = parseFloat(potenciaStr) || 0;
 
       const horaColD = r[3] ? r[3].trim() : '';
+      let diaFinal = diaColA;
+      let horaFinal = horaColD || '--:--';
 
-      // Prioriza a data real da Coluna D se ela vier completa (ex: "28/02/2025 12:20"), senão usa a Coluna A
-      let infoData = extrairDataSegura(horaColD);
-      if (!infoData) {
-        infoData = extrairDataSegura(dataColA);
+      // Se a Coluna D vier com data e hora juntas (ex: "19/11/2026 12:20"), extrai os dois para o tooltip
+      if (horaColD.includes(' ')) {
+        const partes = horaColD.split(' ');
+        diaFinal = partes[0];
+        horaFinal = partes[1];
       }
-      if (!infoData) continue;
-
-      const { dia: diaFinal, mesIdx, ano } = infoData;
-      if (isNaN(ano) || isNaN(mesIdx) || mesIdx < 0 || mesIdx > 11) continue;
 
       const mesNome = mesesNomes[mesIdx];
-      const horaFinal = horaColD.includes(' ') ? horaColD.split(' ')[1] : (horaColD || '--:--');
 
       if (!agrupamentoPorAno.has(ano)) {
         agrupamentoPorAno.set(ano, new Map());
