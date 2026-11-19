@@ -268,3 +268,7 @@ export async function carregarDadosCompletosSheets(spreadsheetId = SPREADSHEET_I
     cadastro,
   };
 }
+export async function carregarTodosOsAnosDinamicos(spreadsheetId = SPREADSHEET_ID): Promise<DemandaAnoData[]> {
+  const res = await carregarDadosCompletosSheets(spreadsheetId);
+  return res.anos;
+}
