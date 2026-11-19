@@ -23,7 +23,7 @@ import { AllPlantsRankingTable } from './components/AllPlantsRankingTable';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { getDemandaFixa } from './data/demandasFixas';
 import { AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
-import { carregarTodosOsAnosDinamicos } from './services/sheetsService';
+import { carregarDadosCompletosSheets, normalizarChaveUsina } from './services/sheetsService';
 
 // ID oficial da sua planilha
 const SPREADSHEET_ID = '11YGvwcxt8-65qKXm-7db5n070FnkAApYajZ-Nl9l9fo';
