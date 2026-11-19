@@ -21,39 +21,8 @@ import { DemandChart } from './components/DemandChart';
 import { MonthlyDetailTable } from './components/MonthlyDetailTable';
 import { AllPlantsRankingTable } from './components/AllPlantsRankingTable';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { getDemandaFixa } from './data/demandasFixas';
 import { AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
-import { carregarDadosCompletosSheets, carregarTodosOsAnosDinamicos, normalizarChaveUsina } from './services/sheetsService';
-
-// ID oficial da sua planilha
-const SPREADSHEET_ID = '11YGvwcxt8-65qKXm-7db5n070FnkAApYajZ-Nl9l9fo';
-
-// Fallbacks locais apenas em caso de falta de conexão à internet
-const LOCAL_2026_PATH = '/data/usinas_demanda_2026.csv';
-const FALLBACK_2026_PATH = '/assets/aistudio/Demanda_pico_por_usina_2026_-_Resumo_mensal__3__550c0c63.csv';
-const FALLBACK_2025_PATH = '/assets/aistudio/Pico_Demanda_Contratada_Mensal_-_Demanda_pico_Ano_2025_419e411e.csv';
-const FALLBACK_2024_PATH = '/assets/aistudio/Pico_Demanda_Contratada_Mensal_-_Demanda_pico_Ano_2024_6d4dad48.csv';
-
-/**
- * Baixa o CSV de uma aba específica do Google Sheets em tempo real
- */
-async function fetchSheetCsvPorAno(ano: number, spreadsheetId: string): Promise<string | null> {
-  const nomeAba = encodeURIComponent(`Demanda pico Ano ${ano}`);
-  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&_t=${Date.now()}`;
-
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const txt = await res.text();
-    if (txt.includes('<!DOCTYPE html>') || txt.includes('google.visualization.Query.setResponse')) {
-      return null;
-    }
-    if (txt.trim().length < 50) return null;
-    return txt;
-  } catch {
-    return null;
-  }
-}
+import { carregarDadosCompletosSheets, normalizarChaveUsina } from './services/sheetsService';
 
 export default function App() {
   const [sheetResult, setSheetResult] = useState<SheetParseResult | null>(null);
@@ -63,13 +32,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Active view tab: 'dashboard' | 'report_over_3' | 'report_under_5'
   const [activeTab, setActiveTab] = useState<AppTab>('dashboard');
-
-  // Filter mode for selected period: 'all' | 'over_3' | 'under_5'
   const [filterMode, setFilterMode] = useState<PeriodFilterMode>('all');
 
-  // Período selecionado inicial (prioriza o mês de Novembro / 2026 recém-atualizado)
   const [selectedMonthIndex, setSelectedMonthIndex] = useState<number>(11);
   const [selectedYear, setSelectedYear] = useState<number>(2026);
 
@@ -80,23 +45,19 @@ export default function App() {
     }, 4000);
   };
 
-  /**
-   * Varre dinamicamente as abas da planilha (2024 até 2 anos à frente)
-   * Detecta automaticamente 2027, 2028 assim que a aba for criada no Google Sheets
-   */
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (forcarAtualizacao = false) => {
     setIsLoading(true);
     setError(null);
 
     try {
-      // 1. Busca os dados brutos da nossa nova função automatizada do Google Sheets
-    const { anos: dadosDinamicos, cadastro } = await carregarDadosCompletosSheets();
+      // 1. Busca os dados da coleta + cadastro (Colunas A, B e C da aba "Informações de demanda")
+      const { anos: dadosDinamicos, cadastro } = await carregarDadosCompletosSheets(undefined, forcarAtualizacao);
 
       if (!dadosDinamicos || dadosDinamicos.length === 0) {
         throw new Error('Não foi possível carregar os dados da planilha Google Sheets.');
       }
 
-      // 2. Converte para o formato interno do site (SheetParseResult) e injeta a Data/Hora do Pico
+      // 2. Converte e amarra cada usina diretamente com as Colunas A, B e C da planilha
       const usinasMap = new Map<string, any>();
       const availableYears = new Set<number>();
 
@@ -109,26 +70,31 @@ export default function App() {
         anoData.dados.forEach((usinaData) => {
           const nome = usinaData.usina;
           if (!usinasMap.has(nome)) {
-            // Usa as demandas fixas cadastradas no site (ou cria padrão de segurança)
             const chave = normalizarChaveUsina(nome);
-const infoPlanilha = cadastro[chave];
-const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000, toleranceLimitKw: 1030, threshold5PctKw: 950 };
+            const infoPlanilha = cadastro[chave];
+
+            // Usa exclusivamente o que está na planilha (Coluna B e Coluna C)
+            const contractedDemandKw = infoPlanilha ? infoPlanilha.contractedDemandKw : 1000;
+            const toleranceLimitKw = infoPlanilha ? infoPlanilha.toleranceLimitKw : Number((contractedDemandKw * 1.03).toFixed(2));
+            const threshold5PctKw = infoPlanilha ? infoPlanilha.threshold5PctKw : Number((contractedDemandKw * 0.05).toFixed(2));
+
             usinasMap.set(nome, {
               id: nome,
               name: nome,
-              contractedDemandKw: fixas.contractedDemandKw,
-              toleranceLimitKw: fixas.toleranceLimitKw,
-              threshold5PctKw: fixas.threshold5PctKw,
+              contractedDemandKw,
+              toleranceLimitKw,
+              threshold5PctKw,
               isExceededAnyMonth: false,
               isUnderutilizedAnyMonth: false,
+              exceededMonthsCount: 0,
               months: [],
-              availableYears: []
+              availableYears: [],
             });
           }
 
           const usinaRecord = usinasMap.get(nome);
           if (!usinaRecord.availableYears.includes(anoData.ano)) {
-             usinaRecord.availableYears.push(anoData.ano);
+            usinaRecord.availableYears.push(anoData.ano);
           }
 
           mesesShort.forEach((mesSigla, index) => {
@@ -137,7 +103,10 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
               const isExceeded = potencia > usinaRecord.toleranceLimitKw;
               const isUnder = potencia < usinaRecord.threshold5PctKw;
 
-              if (isExceeded) usinaRecord.isExceededAnyMonth = true;
+              if (isExceeded) {
+                usinaRecord.isExceededAnyMonth = true;
+                usinaRecord.exceededMonthsCount += 1;
+              }
               if (isUnder) usinaRecord.isUnderutilizedAnyMonth = true;
 
               usinaRecord.months.push({
@@ -151,31 +120,33 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
                 threshold5PctKw: usinaRecord.threshold5PctKw,
                 isExceeded,
                 isUnderutilized: isUnder,
-                excessKw: isExceeded ? potencia - usinaRecord.toleranceLimitKw : 0,
-                percentageOfContracted: (potencia / usinaRecord.contractedDemandKw) * 100,
-                detalhesPico: usinaData.detalhesPico[mesSigla] // <-- AQUI PASSA O DIA E HORA AO GRÁFICO!
+                excessKw: isExceeded ? Number((potencia - usinaRecord.toleranceLimitKw).toFixed(2)) : 0,
+                percentageOfContracted: Number(((potencia / usinaRecord.contractedDemandKw) * 100).toFixed(1)),
+                detalhesPico: usinaData.detalhesPico[mesSigla],
               });
             }
           });
         });
       });
 
+      const usinasList = Array.from(usinasMap.values());
+      const anosCarregados = Array.from(availableYears).sort((a, b) => b - a);
+
       const merged: any = {
-        usinas: Array.from(usinasMap.values()),
-        availableYears: Array.from(availableYears).sort((a, b) => b - a)
+        usinas: usinasList,
+        usinasCount: usinasList.length,
+        availableYears: anosCarregados,
+        sourceType: 'sheets',
       };
 
       if (merged.usinas.length === 0) {
         throw new Error('Nenhuma usina encontrada nos dados da planilha.');
       }
 
-      // 3. Atualiza o site
       setSheetResult(merged);
 
-      const anosCarregados = merged.availableYears;
       const anoMaisRecente = anosCarregados[0] || 2026;
-
-      setCurrentUrl(`Google Sheets Automático (${anosCarregados.join(', ')}) · ${merged.usinas.length} Usinas`);
+      setCurrentUrl(`Google Sheets Integrado (${anosCarregados.join(', ')}) · ${merged.usinas.length} Usinas`);
 
       if (!anosCarregados.includes(selectedYear)) {
         setSelectedYear(anoMaisRecente);
@@ -189,7 +160,9 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
         return firstExceeded ? firstExceeded.id : merged.usinas[0].id;
       });
 
-      showToast(`Google Sheets sincronizado com sucesso! Anos carregados: ${anosCarregados.join(', ')}`);
+      if (forcarAtualizacao) {
+        showToast(`Dados atualizados direto do Google Sheets (${anosCarregados.join(', ')})!`);
+      }
     } catch (err: any) {
       console.error('Fetch error:', err);
       setError(err?.message || 'Erro ao carregar dados operacionais.');
@@ -199,12 +172,10 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
     }
   }, []);
 
-  // Carrega ao abrir a página
   useEffect(() => {
-    fetchData();
+    fetchData(false);
   }, [fetchData]);
 
-  // Upload local de CSV manual
   const handleFileUpload = (file: File) => {
     setIsLoading(true);
     const reader = new FileReader();
@@ -232,7 +203,6 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
     reader.readAsText(file, 'utf-8');
   };
 
-  // Exportar matriz consolidada em CSV
   const handleExportCsv = () => {
     if (sheetResult && sheetResult.usinas.length > 0) {
       exportMonthlyRecordsToCsv(sheetResult.usinas);
@@ -240,58 +210,17 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
     }
   };
 
-  // Usina atualmente selecionada com cálculo de tolerâncias (+3% e corte de 5%)
+  // Usa diretamente os valores amarrados da planilha (Coluna B e Coluna C) sem sobrescrever!
   const selectedUsina: UsinaMonthlyRecord | null = useMemo(() => {
     if (!sheetResult || sheetResult.usinas.length === 0) return null;
-    const found = sheetResult.usinas.find((u) => u.id === selectedUsinaId) || sheetResult.usinas[0];
-    if (!found) return null;
-
-    const fixedDemand = getDemandaFixa(found.name);
-    const contractedDemand = fixedDemand !== null && fixedDemand > 0 ? fixedDemand : found.contractedDemandKw;
-    const toleranceLimit = Math.round(contractedDemand * 1.03 * 100) / 100;
-    const threshold5Pct = Math.round(contractedDemand * 0.05 * 100) / 100;
-
-    if (contractedDemand !== found.contractedDemandKw) {
-      const updatedMonths = found.months.map((m) => {
-        const isExceeded = m.powerKw !== null && m.powerKw > toleranceLimit;
-        const isUnderutilized = m.powerKw === null || (threshold5Pct > 0 && m.powerKw < threshold5Pct);
-        const excess = isExceeded && m.powerKw !== null ? Math.round((m.powerKw - toleranceLimit) * 100) / 100 : 0;
-        const pct = m.powerKw !== null && contractedDemand > 0 ? Math.round((m.powerKw / contractedDemand) * 1000) / 10 : 0;
-        return {
-          ...m,
-          contractedDemandKw: contractedDemand,
-          toleranceLimitKw: toleranceLimit,
-          threshold5PctKw: threshold5Pct,
-          isExceeded,
-          isUnderutilized,
-          excessKw: excess,
-          percentageOfContracted: pct,
-        };
-      });
-
-      const exceededCount = updatedMonths.filter((m) => m.isExceeded).length;
-
-      return {
-        ...found,
-        contractedDemandKw: contractedDemand,
-        toleranceLimitKw: toleranceLimit,
-        threshold5PctKw: threshold5Pct,
-        months: updatedMonths,
-        isExceededAnyMonth: exceededCount > 0,
-        exceededMonthsCount: exceededCount,
-      };
-    }
-
-    return found;
+    return sheetResult.usinas.find((u) => u.id === selectedUsinaId) || sheetResult.usinas[0];
   }, [sheetResult, selectedUsinaId]);
 
-  // Gera opções de período dinamicamente a partir dos anos carregados
   const periodOptions: PeriodOption[] = useMemo(() => {
     if (!sheetResult || sheetResult.usinas.length === 0) return [];
     return generatePeriodOptions(sheetResult.usinas, sheetResult.availableYears);
   }, [sheetResult]);
 
-  // Período atual selecionado
   const currentPeriod = useMemo(() => {
     return (
       periodOptions.find((p) => p.monthIndex === selectedMonthIndex && p.year === selectedYear) ||
@@ -299,41 +228,32 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
     );
   }, [periodOptions, selectedMonthIndex, selectedYear]);
 
-  // Relatório 1: Ultrapassagem > 3%
   const overDemandItems = useMemo(() => {
     if (!sheetResult || sheetResult.usinas.length === 0) return [];
     return getOverDemandReport(sheetResult.usinas, selectedMonthIndex, selectedYear);
   }, [sheetResult, selectedMonthIndex, selectedYear]);
 
-  // Relatório 2: Subutilização < 5%
   const underDemandItems = useMemo(() => {
     if (!sheetResult || sheetResult.usinas.length === 0) return [];
     return getUnderDemandReport(sheetResult.usinas, selectedMonthIndex, selectedYear, true);
   }, [sheetResult, selectedMonthIndex, selectedYear]);
 
-  // Usinas filtradas com base no modo selecionado
   const displayedUsinas = useMemo(() => {
     if (!sheetResult || sheetResult.usinas.length === 0) return [];
     if (filterMode === 'all') return sheetResult.usinas;
 
     if (filterMode === 'over_3') {
       return sheetResult.usinas.filter((u) => {
-        const fixedDemand = getDemandaFixa(u.name);
-        const contractedDemand = fixedDemand !== null && fixedDemand > 0 ? fixedDemand : u.contractedDemandKw;
-        const toleranceLimit = Math.round(contractedDemand * 1.03 * 100) / 100;
         const monthData = u.months.find((m) => m.monthIndex === selectedMonthIndex && m.year === selectedYear);
-        return monthData && monthData.powerKw !== null && monthData.powerKw > toleranceLimit;
+        return monthData && monthData.powerKw !== null && monthData.powerKw > u.toleranceLimitKw;
       });
     }
 
     if (filterMode === 'under_5') {
       return sheetResult.usinas.filter((u) => {
-        const fixedDemand = getDemandaFixa(u.name);
-        const contractedDemand = fixedDemand !== null && fixedDemand > 0 ? fixedDemand : u.contractedDemandKw;
-        const threshold5Pct = Math.round(contractedDemand * 0.05 * 100) / 100;
         const monthData = u.months.find((m) => m.monthIndex === selectedMonthIndex && m.year === selectedYear);
         const powerKw = monthData?.powerKw ?? null;
-        return powerKw === null || powerKw === 0 || (threshold5Pct > 0 && powerKw < threshold5Pct);
+        return powerKw === null || powerKw === 0 || (u.threshold5PctKw > 0 && powerKw < u.threshold5PctKw);
       });
     }
 
@@ -377,7 +297,6 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
   return (
     <ErrorBoundary>
       <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans selection:bg-blue-600 selection:text-white">
-        {/* Toast Global */}
         {toastMessage && (
           <div className="fixed bottom-5 right-5 z-50 flex items-center gap-2 bg-slate-900 text-white px-4 py-3 rounded-xl shadow-xl text-xs font-semibold animate-in fade-in slide-in-from-bottom-2">
             <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
@@ -385,9 +304,8 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
           </div>
         )}
 
-        {/* Header */}
         <Header
-          onRefresh={() => fetchData()}
+          onRefresh={() => fetchData(true)}
           onExportCsv={handleExportCsv}
           isLoading={isLoading}
           totalUsinas={sheetResult?.usinasCount || 0}
@@ -397,19 +315,16 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
           onTabChange={(tab) => setActiveTab(tab)}
         />
 
-        {/* Área Principal */}
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6 space-y-6">
-          {/* Barra de Origem dos Dados */}
           <DataSourceToolbar
             sheetResult={sheetResult}
             isLoading={isLoading}
-            onRefresh={() => fetchData()}
+            onRefresh={() => fetchData(true)}
             onFileUpload={handleFileUpload}
             onExportCsv={handleExportCsv}
             currentUrl={currentUrl}
           />
 
-          {/* Seletor de Período */}
           {periodOptions.length > 0 && (
             <PeriodSelector
               periodOptions={periodOptions}
@@ -432,7 +347,6 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
             />
           )}
 
-          {/* Banner de Erro */}
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 p-4 rounded-xl text-xs flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
@@ -441,7 +355,7 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
               </div>
               <button
                 type="button"
-                onClick={() => fetchData()}
+                onClick={() => fetchData(true)}
                 className="px-2.5 py-1 bg-red-100 hover:bg-red-200 rounded font-bold text-red-800 transition-colors cursor-pointer"
               >
                 Tentar Novamente
@@ -449,7 +363,6 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
             </div>
           )}
 
-          {/* Estado de Carregamento */}
           {isLoading && !sheetResult && (
             <div className="flex flex-col items-center justify-center py-20 text-slate-400 space-y-3">
               <RefreshCw className="w-8 h-8 animate-spin text-blue-600" />
@@ -457,15 +370,13 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
                 Sincronizando abas do Google Sheets em tempo real...
               </p>
               <p className="text-xs text-slate-400">
-                Calculando demandas contratadas fixas, margem (+3%) e subutilização (&lt; 5%).
+                Calculando demandas contratadas, margem (+3%) e subutilização (&lt; 5%).
               </p>
             </div>
           )}
 
-          {/* Conteúdo Carregado */}
           {sheetResult && selectedUsina && (
             <>
-              {/* TAB 1: Dashboard & Gráficos */}
               {activeTab === 'dashboard' && (
                 <div className="space-y-6">
                   <section aria-label="Filtro de Usina">
@@ -519,7 +430,6 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
                 </div>
               )}
 
-              {/* TAB 2: Reporte 1 - Superação > 3% */}
               {activeTab === 'report_over_3' && (
                 <section aria-label="Relatório de Superação Acima de 3%">
                   <OverDemandReport
@@ -531,7 +441,6 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
                 </section>
               )}
 
-              {/* TAB 3: Reporte 2 - Subutilização < 5% */}
               {activeTab === 'report_under_5' && (
                 <section aria-label="Relatório de Subutilização Abaixo de 5%">
                   <UnderDemandReport
@@ -546,7 +455,6 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
           )}
         </main>
 
-        {/* Rodapé */}
         <footer className="bg-white border-t border-slate-200 mt-12 py-5 text-center text-xs text-slate-500">
           <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
             <span>
