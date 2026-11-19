@@ -121,11 +121,21 @@ const usina = usinaBruta
       const usinaData = usinasDoAno.get(usina)!;
       const picoAtualNoMes = usinaData.meses[mesNome] || 0;
 
-      if (potencia > picoAtualNoMes) {
-        usinaData.meses[mesNome] = potencia; // Substitui pelo novo pico
-        usinaData.detalhesPico[mesNome] = { dia: dataStr, hora: horaStr }; // Guarda a hora exata
-      }
-    }
+     if (potencia > picoAtualNoMes) {
+     usinaData.meses[mesNome] = potencia;
+
+     let diaFinal = dataStr;
+     let horaFinal = horaStr;
+
+     // Se a Coluna D já tiver data e hora juntas (ex: "28/02/2025 12:20")
+     if (horaStr.includes(' ')) {
+       const partes = horaStr.split(' ');
+       diaFinal = partes[0];
+       horaFinal = partes[1];
+     }
+
+     usinaData.detalhesPico[mesNome] = { dia: diaFinal, hora: horaFinal };
+   }
 
     // Transforma o Map numa lista (Array) organizada para o site exibir
     const resultadoFinal: DemandaAnoData[] = [];
