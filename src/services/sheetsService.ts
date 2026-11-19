@@ -50,8 +50,8 @@ function parseCsvLinhas(text: string): string[][] {
   return lines;
 }
 
-function parseDataColunaA(str: string): { dia: string; mesIdx: number; ano: number } | null {
-  if (!str) return null;
+function parseDataSegura(str: string): { dia: string; mesIdx: number; ano: number } | null {
+  if (!str || str === 'N/A') return null;
   const apenasData = str.split(' ')[0].trim();
 
   if (apenasData.includes('/')) {
@@ -61,7 +61,7 @@ function parseDataColunaA(str: string): { dia: string; mesIdx: number; ano: numb
       const p1 = parseInt(partes[1], 10);
       const ano = parseInt(partes[2], 10);
 
-      // Se p1 > 12, o Google enviou formato americano MM/DD/YYYY (ex: 11/19/2026 -> Mês 11, Dia 19)
+      // Se o segundo número for > 12 (ex: 11/19/2026), o Google enviou MM/DD/YYYY
       if (p1 > 12) {
         return {
           dia: `${String(p1).padStart(2, '0')}/${String(p0).padStart(2, '0')}/${ano}`,
@@ -70,7 +70,7 @@ function parseDataColunaA(str: string): { dia: string; mesIdx: number; ano: numb
         };
       }
 
-      // Padrão brasileiro DD/MM/YYYY (ex: 01/11/2026 -> Dia 01, Mês 11)
+      // Padrão DD/MM/YYYY (ex: 19/10/2026 ou 01/11/2026)
       return {
         dia: `${String(p0).padStart(2, '0')}/${String(p1).padStart(2, '0')}/${ano}`,
         mesIdx: p1 - 1,
@@ -98,7 +98,9 @@ function parseDataColunaA(str: string): { dia: string; mesIdx: number; ano: numb
 
 export async function carregarTodosOsAnosDinamicos(spreadsheetId = SPREADSHEET_ID): Promise<DemandaAnoData[]> {
   const nomeAba = encodeURIComponent(NOME_ABA_DADOS_BRUTOS);
-const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=0&t=${Date.now()}`;
+  // Endpoint oficial gviz com tq=SELECT A,B,C,D para ler todas as linhas sem bloqueio de CORS
+  const tq = encodeURIComponent('SELECT A, B, C, D');
+  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&tq=${tq}&t=${Date.now()}`;
 
   try {
     const res = await fetch(url);
@@ -118,10 +120,10 @@ const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?form
       if (!r[0] || !r[1]) continue;
 
       const dataColA = r[0].trim();
-      const infoData = parseDataColunaA(dataColA);
-      if (!infoData) continue;
+      const infoColA = parseDataSegura(dataColA);
+      if (!infoColA) continue;
 
-      const { dia: diaColA, mesIdx, ano } = infoData;
+      const { dia: diaColA, mesIdx, ano } = infoColA;
       if (isNaN(ano) || isNaN(mesIdx) || mesIdx < 0 || mesIdx > 11) continue;
 
       const usinaBruta = r[1].trim();
@@ -138,15 +140,23 @@ const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?form
       }
       const potencia = parseFloat(potenciaStr) || 0;
 
-      const horaColD = r[3] ? r[3].trim() : '';
+      const colD = r[3] ? r[3].trim() : '';
       let diaFinal = diaColA;
-      let horaFinal = horaColD || '--:--';
+      let horaFinal = '--:--';
 
-      // Se a Coluna D vier com data e hora juntas (ex: "19/11/2026 12:20"), extrai os dois para o tooltip
-      if (horaColD.includes(' ')) {
-        const partes = horaColD.split(' ');
-        diaFinal = partes[0];
-        horaFinal = partes[1];
+      // Trata os dois padrões da planilha (antes e depois da linha 11218)
+      if (colD && colD !== 'N/A') {
+        if (colD.includes(' ')) {
+          // Padrão antigo (ex: "24/12/2024 14:15")
+          const partes = colD.split(' ');
+          const dataRealD = parseDataSegura(partes[0]);
+          diaFinal = dataRealD ? dataRealD.dia : partes[0];
+          horaFinal = partes[1] || '--:--';
+        } else if (colD.includes(':')) {
+          // Padrão novo a partir da linha 11218 (ex: "10:00") -> usa a data da Coluna A + hora da Coluna D
+          diaFinal = diaColA;
+          horaFinal = colD;
+        }
       }
 
       const mesNome = mesesNomes[mesIdx];
