@@ -23,6 +23,7 @@ import { AllPlantsRankingTable } from './components/AllPlantsRankingTable';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { getDemandaFixa } from './data/demandasFixas';
 import { AlertCircle, CheckCircle2, RefreshCw } from 'lucide-react';
+import { carregarTodosOsAnosDinamicos } from './services/sheetsService';
 
 // ID oficial da sua planilha
 const SPREADSHEET_ID = '11YGvwcxt8-65qKXm-7db5n070FnkAApYajZ-Nl9l9fo';
@@ -88,96 +89,105 @@ export default function App() {
     setError(null);
 
     try {
-      const currentYear = new Date().getFullYear();
-      const minYear = 2024;
-      const maxYear = Math.max(currentYear + 2, 2027);
+      // 1. Busca os dados brutos da nossa nova função automatizada do Google Sheets
+      const dadosDinamicos = await carregarTodosOsAnosDinamicos();
 
-      const anosParaPesquisar: number[] = [];
-      for (let y = minYear; y <= maxYear; y++) {
-        anosParaPesquisar.push(y);
-      }
-
-      // Consulta todas as abas do Google Sheets em paralelo
-      const sheetResponses = await Promise.all(
-        anosParaPesquisar.map(async (ano) => {
-          const csvText = await fetchSheetCsvPorAno(ano, SPREADSHEET_ID);
-          return { ano, csvText };
-        })
-      );
-
-      const parsedResults: SheetParseResult[] = [];
-
-      for (const item of sheetResponses) {
-        if (item.csvText) {
-          try {
-            const parsed = parseSheetCsv(item.csvText, `Demanda_pico_Ano_${item.ano}.csv`, item.ano);
-            if (parsed && parsed.usinas.length > 0) {
-              parsedResults.push(parsed);
-            }
-          } catch (e) {
-            console.warn(`Erro ao processar aba do ano ${item.ano}:`, e);
-          }
-        }
-      }
-
-      // Se o Google Sheets estiver offline/sem rede, recorre aos fallbacks locais
-      if (parsedResults.length === 0) {
-        console.warn('Planilha indisponível, usando arquivos locais de contingência...');
-        const fetchFallback = async (path: string) => {
-          try {
-            const res = await fetch(`${path}?_t=${Date.now()}`);
-            if (res.ok) return await res.text();
-          } catch {}
-          return '';
-        };
-
-        const [fb2024, fb2025, fb2026] = await Promise.all([
-          fetchFallback(FALLBACK_2024_PATH),
-          fetchFallback(FALLBACK_2025_PATH),
-          fetchFallback(LOCAL_2026_PATH).then((txt) => txt || fetchFallback(FALLBACK_2026_PATH)),
-        ]);
-
-        if (fb2024) parsedResults.push(parseSheetCsv(fb2024, 'Pico_Demanda_2024.csv', 2024));
-        if (fb2025) parsedResults.push(parseSheetCsv(fb2025, 'Pico_Demanda_2025.csv', 2025));
-        if (fb2026) parsedResults.push(parseSheetCsv(fb2026, 'Pico_Demanda_2026.csv', 2026));
-      }
-
-      if (parsedResults.length === 0) {
+      if (!dadosDinamicos || dadosDinamicos.length === 0) {
         throw new Error('Não foi possível carregar os dados da planilha Google Sheets.');
       }
 
-      const merged = mergeSheetResults(parsedResults);
+      // 2. Converte para o formato interno do site (SheetParseResult) e injeta a Data/Hora do Pico
+      const usinasMap = new Map<string, any>();
+      const availableYears = new Set<number>();
+
+      const mesesShort = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+      const mesesFull = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+      dadosDinamicos.forEach((anoData) => {
+        availableYears.add(anoData.ano);
+
+        anoData.dados.forEach((usinaData) => {
+          const nome = usinaData.usina;
+          if (!usinasMap.has(nome)) {
+            // Usa as demandas fixas cadastradas no site (ou cria padrão de segurança)
+            const fixas = getDemandaFixa(nome) || { contractedDemandKw: 1000, toleranceLimitKw: 1030, threshold5PctKw: 950 };
+            usinasMap.set(nome, {
+              id: nome,
+              name: nome,
+              contractedDemandKw: fixas.contractedDemandKw,
+              toleranceLimitKw: fixas.toleranceLimitKw,
+              threshold5PctKw: fixas.threshold5PctKw,
+              isExceededAnyMonth: false,
+              isUnderutilizedAnyMonth: false,
+              months: [],
+              availableYears: []
+            });
+          }
+
+          const usinaRecord = usinasMap.get(nome);
+          if (!usinaRecord.availableYears.includes(anoData.ano)) {
+             usinaRecord.availableYears.push(anoData.ano);
+          }
+
+          mesesShort.forEach((mesSigla, index) => {
+            const potencia = usinaData.meses[mesSigla];
+            if (potencia !== undefined && potencia !== null && potencia > 0) {
+              const isExceeded = potencia > usinaRecord.toleranceLimitKw;
+              const isUnder = potencia < usinaRecord.threshold5PctKw;
+
+              if (isExceeded) usinaRecord.isExceededAnyMonth = true;
+              if (isUnder) usinaRecord.isUnderutilizedAnyMonth = true;
+
+              usinaRecord.months.push({
+                year: anoData.ano,
+                monthIndex: index + 1,
+                monthName: mesesFull[index],
+                monthShort: mesSigla,
+                powerKw: potencia,
+                contractedDemandKw: usinaRecord.contractedDemandKw,
+                toleranceLimitKw: usinaRecord.toleranceLimitKw,
+                threshold5PctKw: usinaRecord.threshold5PctKw,
+                isExceeded,
+                isUnderutilized: isUnder,
+                excessKw: isExceeded ? potencia - usinaRecord.toleranceLimitKw : 0,
+                percentageOfContracted: (potencia / usinaRecord.contractedDemandKw) * 100,
+                detalhesPico: usinaData.detalhesPico[mesSigla] // <-- AQUI PASSA O DIA E HORA AO GRÁFICO!
+              });
+            }
+          });
+        });
+      });
+
+      const merged: any = {
+        usinas: Array.from(usinasMap.values()),
+        availableYears: Array.from(availableYears).sort((a, b) => b - a)
+      };
+
       if (merged.usinas.length === 0) {
         throw new Error('Nenhuma usina encontrada nos dados da planilha.');
       }
 
+      // 3. Atualiza o site
       setSheetResult(merged);
 
-      const anosCarregados = merged.availableYears.sort((a, b) => b - a);
+      const anosCarregados = merged.availableYears;
       const anoMaisRecente = anosCarregados[0] || 2026;
 
-      setCurrentUrl(`Google Sheets Conectado (${anosCarregados.join(', ')}) · ${merged.usinas.length} Usinas`);
+      setCurrentUrl(`Google Sheets Automático (${anosCarregados.join(', ')}) · ${merged.usinas.length} Usinas`);
 
       if (!anosCarregados.includes(selectedYear)) {
         setSelectedYear(anoMaisRecente);
       }
 
-      // Seleciona a usina automaticamente (prioriza a usina com ultrapassagem)
-      setSelectedUsinaId((prev) => {
-        if (prev && merged.usinas.some((u) => u.id === prev)) {
-          return prev;
-        }
-        const exceededInLatest = merged.usinas.find((u) => {
-          const m = u.months.find((p) => p.year === anoMaisRecente && p.isExceeded);
-          return !!m;
-        });
+      setSelectedUsinaId((prev: any) => {
+        if (prev && merged.usinas.some((u: any) => u.id === prev)) return prev;
+        const exceededInLatest = merged.usinas.find((u: any) => u.months.find((p: any) => p.year === anoMaisRecente && p.isExceeded));
         if (exceededInLatest) return exceededInLatest.id;
-
-        const firstExceeded = merged.usinas.find((u) => u.isExceededAnyMonth);
+        const firstExceeded = merged.usinas.find((u: any) => u.isExceededAnyMonth);
         return firstExceeded ? firstExceeded.id : merged.usinas[0].id;
       });
 
-      showToast(`Google Sheets sincronizado! Anos: ${anosCarregados.join(', ')} (${merged.usinas.length} usinas)`);
+      showToast(`Google Sheets sincronizado com sucesso! Anos carregados: ${anosCarregados.join(', ')}`);
     } catch (err: any) {
       console.error('Fetch error:', err);
       setError(err?.message || 'Erro ao carregar dados operacionais.');
