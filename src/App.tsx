@@ -197,7 +197,7 @@ const fixas = infoPlanilha || getDemandaFixa(nome) || { contractedDemandKw: 1000
     } finally {
       setIsLoading(false);
     }
-  }, [selectedYear]);
+  }, []);
 
   // Carrega ao abrir a página
   useEffect(() => {

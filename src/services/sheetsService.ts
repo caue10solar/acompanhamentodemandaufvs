@@ -174,12 +174,46 @@ async function carregarCadastroDemandas(spreadsheetId: string): Promise<{ [chave
   return mapa;
 }
 
-export async function carregarDadosCompletosSheets(spreadsheetId = SPREADSHEET_ID): Promise<DadosCompletosSheets> {
-  const nomeAba = encodeURIComponent(NOME_ABA_DADOS_BRUTOS);
-  const tq = encodeURIComponent('SELECT A, B, C, D');
-  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&tq=${tq}&t=${Date.now()}`;
 
-  // Busca as duas abas ao mesmo tempo
+export async function carregarTodosOsAnosDinamicos(spreadsheetId = SPREADSHEET_ID): Promise<DemandaAnoData[]> {
+  const res = await carregarDadosCompletosSheets(spreadsheetId);
+  return res.anos;
+}
+const CACHE_KEY = 'cache_demanda_usinas_v1';
+
+export function limparCacheSheets() {
+  try {
+    localStorage.removeItem(CACHE_KEY);
+  } catch (e) {
+    // Ignora erro se storage estiver bloqueado
+  }
+}
+
+export async function carregarDadosCompletosSheets(
+  spreadsheetId = SPREADSHEET_ID,
+  forcarAtualizacao = false
+): Promise<DadosCompletosSheets> {
+  // 1. Se não for atualização forçada, tenta devolver o cache em menos de 50ms
+  if (!forcarAtualizacao) {
+    try {
+      const salvo = localStorage.getItem(CACHE_KEY);
+      if (salvo) {
+        const parsed = JSON.parse(salvo);
+        // Cache válido por 15 minutos (900.000 ms)
+        if (parsed && parsed.timestamp && Date.now() - parsed.timestamp < 900000 && parsed.dados?.anos?.length > 0) {
+          return parsed.dados;
+        }
+      }
+    } catch (e) {
+      // Se falhar leitura do cache, segue para busca online
+    }
+  }
+
+  const nomeAba = encodeURIComponent(NOME_ABA_DADOS_BRUTOS);
+  // Filtra linhas vazias direto no Google Sheets (WHERE B IS NOT NULL) para reduzir o tamanho do download
+  const tq = encodeURIComponent('SELECT A, B, C, D WHERE B IS NOT NULL');
+  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&tq=${tq}`;
+
   const [resColeta, cadastro] = await Promise.all([
     fetch(url),
     carregarCadastroDemandas(spreadsheetId),
@@ -200,15 +234,14 @@ export async function carregarDadosCompletosSheets(spreadsheetId = SPREADSHEET_I
     const r = rows[i];
     if (!r[0] || !r[1]) continue;
 
-    const dataColA = r[0].trim();
-    const infoColA = parseDataSegura(dataColA);
+    const infoColA = parseDataSegura(r[0].trim());
     if (!infoColA) continue;
 
     const { dia: diaColA, mesIdx, ano } = infoColA;
     if (isNaN(ano) || isNaN(mesIdx) || mesIdx < 0 || mesIdx > 11) continue;
 
-    const usinaBruta = r[1].trim();
-    const usina = usinaBruta
+    const usina = r[1]
+      .trim()
       .replace(/^Solar Field\s*/i, '')
       .replace(/:\s*Active Power$/i, '')
       .trim();
@@ -263,12 +296,23 @@ export async function carregarDadosCompletosSheets(spreadsheetId = SPREADSHEET_I
     });
   });
 
-  return {
+  const resultadoFinal: DadosCompletosSheets = {
     anos: anos.sort((a, b) => b.ano - a.ano),
     cadastro,
   };
-}
-export async function carregarTodosOsAnosDinamicos(spreadsheetId = SPREADSHEET_ID): Promise<DemandaAnoData[]> {
-  const res = await carregarDadosCompletosSheets(spreadsheetId);
-  return res.anos;
+
+  // Salva o resultado no navegador para próximas aberturas instantâneas
+  try {
+    localStorage.setItem(
+      CACHE_KEY,
+      JSON.stringify({
+        timestamp: Date.now(),
+        dados: resultadoFinal,
+      })
+    );
+  } catch (e) {
+    // Ignora se estourar limite de storage
+  }
+
+  return resultadoFinal;
 }
