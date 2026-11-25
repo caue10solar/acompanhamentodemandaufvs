@@ -215,7 +215,7 @@ export async function carregarDadosCompletosSheets(
   const nomeAba = encodeURIComponent(NOME_ABA_DADOS_BRUTOS);
   // Filtra linhas vazias direto no Google Sheets (WHERE B IS NOT NULL) para reduzir o tamanho do download
   const tq = encodeURIComponent('SELECT A, B, C, D WHERE B IS NOT NULL');
-const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&t=${Date.now()}`;
+const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&tq=${tq}&t=${Date.now()}`;
 
   const [resColeta, cadastro] = await Promise.all([
     fetch(url),
