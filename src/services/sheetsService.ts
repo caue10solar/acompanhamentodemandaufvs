@@ -27,14 +27,14 @@ export interface DadosCompletosSheets {
 }
 
 // Normaliza nomes para cruzar perfeitamente (ex: "Iraí de Minas I" == "Irai de Minas I", "Salto de Pirapora - UFV 4" == "Salto de Pirapora (UFV 4)")
-export function normalizarChaveUsina(nome: string): string {
-  return nome
+export function normalizarChaveUsina(name: string): string {
+  return name
+    .replace(/^Solar Field\s+/i, '')   // Remove "Solar Field " do início
+    .replace(/:\s*Active Power$/i, '') // Remove ": Active Power" do final
     .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '') // Remove acentos
-    .replace(/[-()]/g, ' ') // Troca hífens e parênteses por espaço
-    .replace(/\s+/g, ' ') // Remove espaços duplos
-    .trim()
-    .toLowerCase();
+    .replace(/[\u0300-\u036f]/g, '')   // Remove acentos (ex: Iraí -> Irai)
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');        // Remove espaços, traços e parênteses para bater exato
 }
 
 function parseNumeroPlanilha(valStr: string | undefined): number {
