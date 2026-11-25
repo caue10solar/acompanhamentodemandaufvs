@@ -39,11 +39,14 @@ export function normalizarChaveUsina(name: string): string {
 
 function parseNumeroPlanilha(valStr: string | undefined): number {
   if (!valStr) return 0;
-  let limpo = valStr.trim();
+  let limpo = valStr.trim().replace(/\s/g, '');
   if (limpo.includes(',') && limpo.includes('.')) {
     limpo = limpo.replace(/\./g, '').replace(',', '.');
   } else if (limpo.includes(',')) {
     limpo = limpo.replace(',', '.');
+  } else if (/^\d{1,3}(\.\d{3})+$/.test(limpo)) {
+    // Remove ponto de milhar (ex: "1.080" -> "1080")
+    limpo = limpo.replace(/\./g, '');
   }
   return parseFloat(limpo) || 0;
 }
@@ -132,7 +135,7 @@ function parseDataSegura(str: string): { dia: string; mesIdx: number; ano: numbe
 async function carregarCadastroDemandas(spreadsheetId: string): Promise<{ [chave: string]: UsinaCadastroInfo }> {
   const nomeAba = encodeURIComponent(NOME_ABA_CADASTRO);
   const tq = encodeURIComponent('SELECT A, B, C');
- const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=0&sheet=${nomeAba}`;
+  const url = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/gviz/tq?tqx=out:csv&sheet=${nomeAba}&tq=${tq}&t=${Date.now()}`;
 
   const mapa: { [chave: string]: UsinaCadastroInfo } = {};
 
@@ -164,7 +167,7 @@ async function carregarCadastroDemandas(spreadsheetId: string): Promise<{ [chave
         usina: usinaNome,
         contractedDemandKw: contratada,
         toleranceLimitKw: limite,
-        threshold5PctKw: Number((contratada * 0.95).toFixed(2)),
+        threshold5PctKw: Number((contratada * 0.05).toFixed(2)),
       };
     }
   } catch (err) {
